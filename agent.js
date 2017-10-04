@@ -7,7 +7,8 @@ class SSHConnectionManager {
     this.via = via;
     this.cache = {};
     this.connecting = {};
-    this.connCount = 0;
+    this.channelCount = 0;
+    this.debug = false;
   }
 
   bind(httpAgent) {
@@ -63,11 +64,17 @@ class SSHConnectionManager {
       this.connecting[key] = new Promise(r => (connected = r));
       //do ssh handshake
       client = await this.sshConnect(via);
+      //remove from cache asap
+      let clientend = client.end;
+      client.end = () => {
+        delete this.cache[key];
+        clientend.call(client);
+      };
       client.on("close", () => {
         delete this.cache[key];
       });
       //connected!
-      client.connCount = 0;
+      client.channelsOpen = 0;
       delete this.connecting[key];
       this.cache[key] = client;
       connected();
@@ -87,37 +94,89 @@ class SSHConnectionManager {
   }
 
   sshFoward(client, to) {
-    let id = ++this.connCount;
+    //channel debugging
+    let id = ++this.channelCount;
+    const debug = () => {
+      if (this.debug) {
+        let prefix = "[ssh-agent] ch#" + id + ":";
+        console.log.apply(console, [prefix].concat(Array.from(arguments)));
+      }
+    };
+    //count open channels
+    client.channelsOpen++;
+    const done = function() {
+      client.channelsOpen--;
+      debug("done (open " + client.channelsOpen + ")");
+      if (client.channelsOpen === 0) {
+        client.end();
+      }
+    };
     return new Promise((resolve, reject) => {
+      debug("forward", to);
       client.forwardOut("127.0.0.1", 0, to.host, to.port, (err, stream) => {
         if (err) {
+          done();
           return reject(err);
         }
+        const w = stream.write;
+        stream.write = function(buff, callback) {
+          debug("write", buff.length);
+          w.call(stream, buff, function() {
+            debug("wrote");
+            callback();
+          });
+        };
+        const r = stream.read;
+        stream.read = function(n) {
+          debug("read", n || "");
+          return r.call(stream, n);
+        };
         stream.allowHalfOpen = false;
         stream.setKeepAlive = () => {
-          console.log("ssh-agent: TODO: keepalive");
+          debug("TODO: keepalive");
         };
         stream.setNoDelay = () => {
-          console.log("ssh-agent: TODO: set no delay");
+          debug("TODO: set no delay");
         };
         stream.setTimeout = () => {
-          console.log("ssh-agent: TODO: set timeout");
+          debug("TODO: set timeout");
         };
         stream.ref = () => {
-          console.log("ssh-agent: TODO: ref");
+          debug("TODO: ref");
         };
         stream.unref = () => {
-          console.log("ssh-agent: TODO: unref");
+          debug("TODO: unref");
         };
-        stream.destroySoon = stream.destroy;
+        stream.destroySoon = () => {
+          debug("destroy soon");
+          stream.end();
+        };
+        stream.destroy = () => {
+          debug("destroy");
+          stream.end();
+        };
+        const e = stream.end;
+        stream.end = function() {
+          debug("end");
+          e.call(stream);
+        };
+        stream.on("readable", () => {
+          debug("readable");
+        });
+        stream.on("pipe", () => {
+          debug("pipe");
+        });
+        stream.on("unpipe", () => {
+          debug("unpipe");
+        });
+        stream.on("finish", () => {
+          debug("finish");
+        });
         //handle stream closes, close client on last stream
-        client.connCount++;
+        debug("open");
         stream.on("close", () => {
-          client.connCount--;
-          if (client.connCount === 0) {
-            //triggers removal from cache
-            client.end();
-          }
+          debug("close");
+          done();
         });
         //pass back to http
         resolve(stream);
