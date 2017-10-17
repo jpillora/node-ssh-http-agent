@@ -1,17 +1,13 @@
 {
   "name": "ssh-http-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "",
   "main": "agent.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jpillora/node-ssh-http-agent.git"
   },
-  "keywords": [
-    "ssh",
-    "http",
-    "agent"
-  ],
+  "keywords": ["ssh", "http", "agent"],
   "author": "Jaime Pillora <dev@jpillora.com>",
   "license": "MIT",
   "bugs": {

@@ -8,7 +8,14 @@ class SSHConnectionManager {
     this.cache = {};
     this.connecting = {};
     this.channelCount = 0;
-    this.debug = false;
+    if (via.debug) {
+      this.debug = function() {
+        let prefix = "[ssh-agent]";
+        console.log.apply(console, [prefix].concat(Array.from(arguments)));
+      };
+    } else {
+      this.debug = function() {}; //noop
+    }
   }
 
   bind(httpAgent) {
@@ -19,6 +26,7 @@ class SSHConnectionManager {
   }
 
   createConnection(opts, callback) {
+    this.debug("create connection");
     //use httpOptions.via
     let via = opts.via || {};
     //fallback to sshAgent options
@@ -63,7 +71,9 @@ class SSHConnectionManager {
       let connected;
       this.connecting[key] = new Promise(r => (connected = r));
       //do ssh handshake
+      this.debug("connecting...");
       client = await this.sshConnect(via);
+      this.debug("connected");
       //remove from cache asap
       let clientend = client.end;
       client.end = () => {
@@ -72,6 +82,7 @@ class SSHConnectionManager {
       };
       client.on("close", () => {
         delete this.cache[key];
+        this.debug("disconnected");
       });
       //connected!
       client.channelsOpen = 0;
@@ -96,12 +107,7 @@ class SSHConnectionManager {
   sshFoward(client, to) {
     //channel debugging
     let id = ++this.channelCount;
-    const debug = () => {
-      if (this.debug) {
-        let prefix = "[ssh-agent] ch#" + id + ":";
-        console.log.apply(console, [prefix].concat(Array.from(arguments)));
-      }
-    };
+    const debug = this.debug.bind(this, `ch#${id}:`);
     //count open channels
     client.channelsOpen++;
     const done = function() {
@@ -118,19 +124,6 @@ class SSHConnectionManager {
           done();
           return reject(err);
         }
-        const w = stream.write;
-        stream.write = function(buff, callback) {
-          debug("write", buff.length);
-          w.call(stream, buff, function() {
-            debug("wrote");
-            callback();
-          });
-        };
-        const r = stream.read;
-        stream.read = function(n) {
-          debug("read", n || "");
-          return r.call(stream, n);
-        };
         stream.allowHalfOpen = false;
         stream.setKeepAlive = () => {
           debug("TODO: keepalive");
@@ -154,11 +147,6 @@ class SSHConnectionManager {
         stream.destroy = () => {
           debug("destroy");
           stream.end();
-        };
-        const e = stream.end;
-        stream.end = function() {
-          debug("end");
-          e.call(stream);
         };
         stream.on("readable", () => {
           debug("readable");
