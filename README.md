@@ -15,22 +15,51 @@ npm install --save ssh-http-agent
 
 ### Usage
 
-With `http`:
+Simple tunnel via `1.2.3.4`:
 
 ```js
 const sshAgent = require("ssh-http-agent");
 const http = require("http");
 
-https.get(
+http.get(
   {
-    host: "echo.jpillora.com",
-    path: "/foo/bar",
     agent: sshAgent.http({
       host: "1.2.3.4",
       port: 22,
       username: "root",
       password: "supersecret"
-    })
+    }),
+    host: "echo.jpillora.com",
+    path: "/foo/bar"
+  },
+  res => {
+    console.log(res.headers);
+  }
+);
+```
+
+Nested tunnels:
+
+```js
+const sshAgent = require("ssh-http-agent");
+const http = require("http");
+
+http.get(
+  {
+    agent: sshAgent.http([
+      {
+        host: "first.hop.com",
+        username: "root",
+        password: "supersecret"
+      },
+      {
+        host: "second.hop.com",
+        username: "root",
+        password: "supersecret"
+      }
+    ]),
+    host: "third.hop.com",
+    path: "/foo/bar"
   },
   res => {
     console.log(res.headers);
@@ -63,14 +92,19 @@ request.get(
 
 Create an agent with:
 
-* `sshAgent(httpAgent, sshConfig)`
-* `sshAgent.http(sshConfig)`
-* `sshAgent.https(sshConfig)`
+* `sshAgent(httpAgent, sshConfig, debug)`
+* `sshAgent.http(sshConfig, debug)`
+* `sshAgent.https(sshConfig, debug)`
 
 Where:
 
 * `httpAgent` is an instance of [`http.Agent`](https://nodejs.org/api/http.html#http_class_http_agent) or [`https.Agent`](https://nodejs.org/api/https.html#https_class_https_agent)
-* `sshConfig` is an `ssh2` [client configuration object](https://github.com/mscdex/ssh2#client-methods)
+* `sshConfig` is one or many `ssh2` client configuration objects(https://github.com/mscdex/ssh2#client-methods)
+* `debug` is a `boolean` which enabled debug printing
+
+### Notes
+
+* Requires Node 8+
 
 #### MIT License
 

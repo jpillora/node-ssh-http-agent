@@ -27,9 +27,9 @@ const http = require("http");
 
 let req1 = http.get(
   {
+    agent: agent,
     host: "echo.jpillora.com",
-    path: "/req1/foo/bar",
-    agent: agent
+    path: "/req1/foo/bar"
   },
   async res => {
     console.log(await readAll(res));
@@ -40,9 +40,9 @@ req1.end();
 
 let req2 = http.get(
   {
+    agent: agent,
     host: "echo.jpillora.com",
-    path: "/req2/ping/pong",
-    agent: agent
+    path: "/req2/ping/pong"
   },
   async res => {
     console.log(await readAll(res));
