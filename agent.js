@@ -171,7 +171,12 @@ class SSHConnectionManager {
         client.channelsOpen--;
         sdebug(`unforward (open ${client.channelsOpen})`);
         if (client.channelsOpen === 0) {
-          client.end();
+          process.nextTick(() => {
+            if (client.channelsOpen === 0) {
+              sdebug(`close ssh, no more forwards open`);
+              client.end();
+            }
+          });
         }
       };
       client.forwardOut("127.0.0.1", 0, host, port, (err, stream) => {
