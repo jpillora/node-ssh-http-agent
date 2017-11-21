@@ -1,7 +1,7 @@
 const net = require("net");
 const http = require("http");
 const https = require("https");
-const {Client} = require("ssh2");
+const { Client } = require("ssh2");
 
 //implements "private" properties
 const debug = Symbol();
@@ -11,7 +11,7 @@ class SSHConnectionManager {
   constructor(vias, enableDebug) {
     this.vias = Array.isArray(vias) ? vias : [vias];
     this.vias.forEach(v => {
-      if (!v.host) throw `"host" required`;
+      if (!v || !v.host) throw `"host" required`;
     });
     this.socks = {};
     this.channelCount = 0;
@@ -35,6 +35,10 @@ class SSHConnectionManager {
   }
 
   bind(httpAgent) {
+    if (this.vias.length === 0) {
+      this[debug]("no ssh configs provided");
+      return;
+    }
     this.httpAgent = httpAgent;
     this.wrapTLS = httpAgent.protocol === "https:";
     this.origCreateConnection = this.httpAgent.createConnection.bind(httpAgent);
@@ -54,7 +58,7 @@ class SSHConnectionManager {
     let socket, client;
     for (let i = 0; i < this.vias.length; i++) {
       let via = this.vias[i];
-      let {host, port = 22} = via;
+      let { host, port = 22 } = via;
       socket = await this.dedupSock(host, port, async () => {
         return i === 0
           ? //initialise sock with tcp
@@ -65,11 +69,11 @@ class SSHConnectionManager {
       //handshake ssh over current sock
       client = await this.sshConnect(socket, via);
     }
-    //final hop should always be forwared
+    //final hop should always be forwarded
     socket = await this.sshFoward(client, httpOpts.host, httpOpts.port);
     //optional tls handshake via https agent...
     if (this.wrapTLS) {
-      socket = this.origCreateConnection(Object.assign({socket}, opts));
+      socket = this.origCreateConnection(Object.assign({ socket }, httpOpts));
     }
     return socket;
   }
@@ -101,29 +105,29 @@ class SSHConnectionManager {
   }
 
   async sshConnect(sock, opts) {
-    sock[debug](`ssh connect`);
+    sock[debug](`ssh handshake`);
     // currently connecting?
     let client = sock[cachedClient];
     if (client instanceof Promise) {
       sock[debug](`ssh connect already in progress`);
       await client;
+      client = sock[cachedClient];
     }
     //connect and cache ssh connections
-    client = sock[cachedClient];
     if (!client) {
       //create a promise to catch duplicate connection requests
       let done;
       sock[cachedClient] = new Promise(r => (done = r));
       //do connect!
-      sock[debug]("connecting...");
+      sock[debug]("ssh handshaking...");
       client = await new Promise((resolve, reject) => {
         var c = new Client();
         c.on("ready", () => resolve(c));
         c.on("error", err => reject(err));
-        c.connect(Object.assign({sock}, opts));
+        c.connect(Object.assign({ sock }, opts));
       });
       client[debug] = sock[debug].inherit(`@${opts.username || "anon"}`);
-      client[debug]("connected");
+      client[debug]("ssh handshook, connected");
       let clientend = client.end;
       client.end = () => {
         delete sock[cachedClient]; //remove from cache asap
@@ -131,7 +135,7 @@ class SSHConnectionManager {
       };
       client.on("close", () => {
         delete sock[cachedClient];
-        client[debug]("disconnected");
+        client[debug]("ssh disconnected");
       });
       client.channelsOpen = 0;
       sock[cachedClient] = client;
@@ -140,7 +144,7 @@ class SSHConnectionManager {
     return client;
   }
 
-  //local tcp dial
+  //local tcp dial (manual-async)
   tcpConnect(host, port) {
     return new Promise((resolve, reject) => {
       let sock = net.createConnection(port, host);
@@ -154,24 +158,22 @@ class SSHConnectionManager {
     });
   }
 
-  //remote tcp dial
+  //remote tcp dial (manual-async)
   sshFoward(client, host, port) {
-    //channel debugging
-    let id = ++this.channelCount;
-    const sdebug = client[debug].inherit(`ch#${id}`);
-    //count open channels, close on end last
-    client.channelsOpen++;
-    sdebug(`start (open ${client.channelsOpen})`);
-    const done = function() {
-      client.channelsOpen--;
-      sdebug(`end (open ${client.channelsOpen})`);
-      if (client.channelsOpen === 0) {
-        client.end();
-      }
-    };
-    //manual-async
     return new Promise((resolve, reject) => {
-      sdebug("forward", host, port);
+      //channel debugging
+      let id = ++this.channelCount;
+      const sdebug = client[debug].inherit(`ch#${id}[${host}:${port}]`);
+      //count open channels, close on end last
+      client.channelsOpen++;
+      sdebug(`forward (open ${client.channelsOpen})`);
+      const done = function() {
+        client.channelsOpen--;
+        sdebug(`unforward (open ${client.channelsOpen})`);
+        if (client.channelsOpen === 0) {
+          client.end();
+        }
+      };
       client.forwardOut("127.0.0.1", 0, host, port, (err, stream) => {
         if (err) {
           done();
@@ -219,8 +221,8 @@ class SSHConnectionManager {
           sdebug("close");
           done();
         });
-        //pass back to http
-        stream[debug] = sdebug.inherit(`[${host}:${port}]`);
+        //stream ready
+        stream[debug] = sdebug;
         resolve(stream);
       });
     });
