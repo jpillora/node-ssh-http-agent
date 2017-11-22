@@ -8,14 +8,29 @@ const debug = Symbol();
 const cachedClient = Symbol();
 
 class SSHConnectionManager {
-  constructor(vias, enableDebug) {
+  constructor(vias, opts) {
     this.vias = Array.isArray(vias) ? vias : [vias];
     this.vias.forEach(v => {
       if (!v || !v.host) throw `"host" required`;
     });
     this.socks = {};
     this.channelCount = 0;
-    if (enableDebug) {
+    //init opts
+    if (typeof opts === "boolean") {
+      opts = { debug: opts };
+    } else if (!opts) {
+      opts = {};
+    }
+    //default opts
+    if (opts.debug !== true) {
+      opts.debug = false;
+    }
+    if (typeof opts.disconnectDelay !== "number") {
+      opts.disconnectDelay = 0; //disconnect asap after last conn
+    }
+    this.opts = opts;
+    //prepare logger
+    if (opts.debug) {
       this[debug] = function() {
         let prefix = "[ssh-agent]";
         console.log.apply(console, [prefix].concat(Array.from(arguments)));
@@ -93,6 +108,11 @@ class SSHConnectionManager {
       this.socks[key] = new Promise(r => (done = r));
       sock = await create();
       sock[debug]("connected");
+      let sockend = sock.end;
+      sock.end = () => {
+        delete this.socks[key]; //remove from cache asap
+        sockend.call(sock);
+      };
       sock.on("close", () => {
         delete this.socks[key];
         sock[debug]("disconnected");
@@ -105,7 +125,7 @@ class SSHConnectionManager {
   }
 
   async sshConnect(sock, opts) {
-    sock[debug](`ssh handshake`);
+    sock[debug](`ssh connect`);
     // currently connecting?
     let client = sock[cachedClient];
     if (client instanceof Promise) {
@@ -167,16 +187,17 @@ class SSHConnectionManager {
       //count open channels, close on end last
       client.channelsOpen++;
       sdebug(`forward (open ${client.channelsOpen})`);
-      const done = function() {
+      const done = () => {
         client.channelsOpen--;
         sdebug(`unforward (open ${client.channelsOpen})`);
         if (client.channelsOpen === 0) {
-          process.nextTick(() => {
-            if (client.channelsOpen === 0) {
-              sdebug(`close ssh, no more forwards open`);
-              client.end();
-            }
-          });
+          setTimeout(autoDisconnect, this.opts.disconnectDelay);
+        }
+      };
+      const autoDisconnect = () => {
+        if (client.channelsOpen === 0) {
+          sdebug(`close ssh, no more forwards open`);
+          client.end();
         }
       };
       client.forwardOut("127.0.0.1", 0, host, port, (err, stream) => {
