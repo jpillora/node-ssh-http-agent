@@ -28,6 +28,13 @@ class SSHConnectionManager {
     if (typeof opts.disconnectDelay !== "number") {
       opts.disconnectDelay = 0; //disconnect asap after last conn
     }
+    let timeout = 5000;
+    if (typeof opts.timeout === "number") {
+      timeout = opts.timeout;
+      delete opts.timeout;
+      opts.readyTimeout = timeout; //also set ssh readytimeout
+    }
+    this.timeout = timeout;
     this.opts = opts;
     //prepare logger
     if (opts.debug) {
@@ -60,12 +67,11 @@ class SSHConnectionManager {
     this.httpAgent.createConnection = this.createConnection.bind(this);
   }
 
-  createConnection(opts, callback) {
+  createConnection(httpOpts, callback) {
     this[debug]("create connection");
-    this.createConnectionAsync(opts).then(
-      sock => callback(null, sock),
-      err => callback(err)
-    );
+    this.createConnectionAsync(httpOpts)
+      .then(sock => callback(null, sock))
+      .catch(err => callback(err));
   }
 
   async createConnectionAsync(httpOpts) {
@@ -169,11 +175,24 @@ class SSHConnectionManager {
     return new Promise((resolve, reject) => {
       let sock = net.createConnection(port, host);
       sock[debug] = this[debug].inherit(`[${host}:${port}]`);
-      sock.once("connect", () => {
-        resolve(sock);
+      const fail = err => {
+        if (fail.ed) return;
+        sock[debug](err);
+        fail.ed = true;
+        reject(err);
+      };
+      sock.setTimeout(this.timeout, () => {
+        fail(new Error("TCP Timed out"));
       });
       sock.once("error", err => {
-        reject(err);
+        fail(err);
+      });
+      sock.once("close", () => {
+        fail("closed");
+      });
+      sock.once("connect", () => {
+        sock[debug]("connected");
+        resolve(sock);
       });
     });
   }
