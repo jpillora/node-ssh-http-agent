@@ -175,14 +175,16 @@ class SSHConnectionManager {
     return new Promise((resolve, reject) => {
       let sock = net.createConnection(port, host);
       sock[debug] = this[debug].inherit(`[${host}:${port}]`);
+      let returned = false;
       const fail = err => {
-        if (fail.ed) return;
+        if (returned) return;
+        returned = true;
         sock[debug](err);
-        fail.ed = true;
         reject(err);
       };
+      sock.setNoDelay(true);
       sock.setTimeout(this.timeout, () => {
-        fail(new Error("TCP Timed out"));
+        fail(new Error(`TCP Timed out after ${this.timeout}ms`));
       });
       sock.once("error", err => {
         fail(err);
@@ -191,6 +193,7 @@ class SSHConnectionManager {
         fail("closed");
       });
       sock.once("connect", () => {
+        returned = true;
         sock[debug]("connected");
         resolve(sock);
       });
