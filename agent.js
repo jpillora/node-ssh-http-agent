@@ -15,7 +15,7 @@ class SSHConnectionManager {
     });
     this.socks = {};
     this.channelCount = 0;
-    //init opts
+    //init opts (ssh global options, inserted into all vias)
     if (typeof opts === "boolean") {
       opts = { debug: opts };
     } else if (!opts) {
@@ -25,14 +25,18 @@ class SSHConnectionManager {
     if (opts.debug !== true) {
       opts.debug = false;
     }
-    if (typeof opts.disconnectDelay !== "number") {
-      opts.disconnectDelay = 0; //disconnect asap after last conn
+    //disconnect asap after last conn
+    this.disconnectDelay = 0;
+    if (typeof opts.disconnectDelay === "number") {
+      this.disconnectDelay = opts.disconnectDelay;
+      delete opts.disconnectDelay;
     }
+    //tcp+ssh timeouts
     let timeout = 5000;
     if (typeof opts.timeout === "number") {
       timeout = opts.timeout;
       delete opts.timeout;
-      opts.readyTimeout = timeout; //also set ssh readytimeout
+      opts.readyTimeout = timeout;
     }
     this.timeout = timeout;
     this.opts = opts;
@@ -213,7 +217,7 @@ class SSHConnectionManager {
         client.channelsOpen--;
         sdebug(`unforward (open ${client.channelsOpen})`);
         if (client.channelsOpen === 0) {
-          setTimeout(autoDisconnect, this.opts.disconnectDelay);
+          setTimeout(autoDisconnect, this.disconnectDelay);
         }
       };
       const autoDisconnect = () => {
