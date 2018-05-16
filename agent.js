@@ -291,7 +291,7 @@ sshAgent.http = function(via, debug) {
   return sshAgent(new http.Agent(), via, debug);
 };
 
-sshAgent.https = function(via) {
+sshAgent.https = function(via, debug) {
   return sshAgent(new https.Agent(), via, debug);
 };
 
